@@ -3,15 +3,20 @@ import aiosqlite
 import datetime
 import pytz
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, DefaultBotProperties
+from aiogram.filters import Command, Text
 
 BOT_TOKEN = "8520176300:AAEU1qoEmP2Nn1Fu8_CYicS3jbgF016fN_8"
 ADMIN_ID = 5166153612
 DB_PATH = 'quran_bot.db'
 DEFAULT_TZ = pytz.timezone("Africa/Cairo")
 
-bot = Bot(BOT_TOKEN, parse_mode="HTML")
-dp = Dispatcher()
+# ---- Bot and Dispatcher ----
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
+dp = Dispatcher(bot)
 
 # ---- Database setup ----
 async def init_db():
@@ -32,7 +37,7 @@ async def init_db():
         await db.commit()
 
 # ---- Admin commands ----
-@dp.message(commands=['start'])
+@dp.message(Command("start"))
 async def start_cmd(msg: types.Message):
     if msg.from_user.id == ADMIN_ID:
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -44,11 +49,12 @@ async def start_cmd(msg: types.Message):
     else:
         await msg.answer("بوت نشر تلقائي للقرآن والأذكار")
 
-@dp.callback_query(lambda c: c.data == 'add_ch')
+@dp.callback_query(Text("add_ch"))
 async def add_channel_cb(cb: types.CallbackQuery):
     await cb.message.answer("ارسل معرف القناة (ID) ولغتها ar/en مفصولة بمسافة")
     await cb.answer()
 
+# ---- Admin message handler for adding channels ----
 @dp.message()
 async def add_channel(msg: types.Message):
     if msg.from_user.id != ADMIN_ID:
@@ -57,7 +63,12 @@ async def add_channel(msg: types.Message):
     if len(parts) != 2:
         await msg.reply("صيغة خاطئة. مثال: -100123456789 ar")
         return
-    ch_id, lang = int(parts[0]), parts[1]
+    try:
+        ch_id, lang = int(parts[0]), parts[1]
+    except ValueError:
+        await msg.reply("معرف القناة يجب أن يكون رقماً صحيحاً")
+        return
+
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT OR IGNORE INTO channels(channel_id, lang) VALUES (?,?)", (ch_id, lang))
         await db.commit()
@@ -85,38 +96,43 @@ async def auto_poster():
         now = datetime.datetime.now(DEFAULT_TZ)
         hour = now.hour
         async with aiosqlite.connect(DB_PATH) as db:
-            cur = await db.execute("SELECT channel_id, lang, enabled_ayah, enabled_hadith, enabled_azkar_morning, enabled_azkar_evening, enabled_daily_recap, enabled_audio FROM channels")
+            cur = await db.execute("""
+                SELECT channel_id, lang, enabled_ayah, enabled_hadith, enabled_azkar_morning,
+                       enabled_azkar_evening, enabled_daily_recap, enabled_audio
+                FROM channels
+            """)
             channels = await cur.fetchall()
+
         for ch_id, lang, e_ayah, e_hadith, e_morn, e_even, e_recap, e_audio in channels:
+            content = None
             if hour == 6 and e_morn:
                 content = await fetch_content('azkar_morning', lang)
             elif hour == 18 and e_even:
                 content = await fetch_content('azkar_evening', lang)
             elif hour % 3 == 0 and e_ayah:
                 content = await fetch_content('ayah', lang)
-            else:
-                await asyncio.sleep(60)
+
+            if content is None:
                 continue
-            if isinstance(content, dict):
-                try:
+
+            try:
+                if isinstance(content, dict):
                     if content.get('file_id'):
                         await bot.send_audio(ch_id, content['file_id'], caption=content.get('caption'))
                     else:
                         await bot.send_audio(ch_id, content['url'], caption=content.get('caption'))
-                except:
-                    pass
-            else:
-                try:
+                else:
                     await bot.send_message(ch_id, content)
-                except:
-                    pass
+            except Exception as e:
+                print(f"خطأ أثناء الإرسال للقناة {ch_id}: {e}")
+
         await asyncio.sleep(3600)
 
 # ---- Main ----
 async def main():
     await init_db()
     asyncio.create_task(auto_poster())
-    await dp.start_polling(bot)
+    await dp.start_polling()
 
 if __name__ == '__main__':
     asyncio.run(main())
