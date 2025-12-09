@@ -3,7 +3,8 @@ import aiosqlite
 import datetime
 import pytz
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, DefaultBotProperties
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command, Text
 
 BOT_TOKEN = "8520176300:AAEU1qoEmP2Nn1Fu8_CYicS3jbgF016fN_8"
