@@ -5,7 +5,7 @@ import pytz
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
-from aiogram.filters import Command, Text
+from aiogram.filters import Command
 
 BOT_TOKEN = "8520176300:AAEU1qoEmP2Nn1Fu8_CYicS3jbgF016fN_8"
 ADMIN_ID = 5166153612
@@ -50,7 +50,8 @@ async def start_cmd(msg: types.Message):
     else:
         await msg.answer("بوت نشر تلقائي للقرآن والأذكار")
 
-@dp.callback_query(Text("add_ch"))
+# ---- Callback for "add_ch" ----
+@dp.callback_query(lambda c: c.data == "add_ch")
 async def add_channel_cb(cb: types.CallbackQuery):
     await cb.message.answer("ارسل معرف القناة (ID) ولغتها ar/en مفصولة بمسافة")
     await cb.answer()
@@ -78,17 +79,17 @@ async def add_channel(msg: types.Message):
 # ---- Content fetching ----
 async def fetch_content(kind: str, lang: str):
     if kind == 'ayah':
-        return 'بسم الله الرحمن الرحيم' if lang=='ar' else 'In the name of Allah, the Most Gracious'
+        return 'بسم الله الرحمن الرحيم' if lang == 'ar' else 'In the name of Allah, the Most Gracious'
     elif kind == 'hadith':
-        return 'عن النبي ﷺ: خيركم من تعلم القرآن وعلمه' if lang=='ar' else 'The best of you are those who learn and teach the Qur’an.'
+        return 'عن النبي ﷺ: خيركم من تعلم القرآن وعلمه' if lang == 'ar' else 'The best of you are those who learn and teach the Qur’an.'
     elif kind == 'azkar_morning':
-        return 'أذكار الصباح' if lang=='ar' else 'Morning Remembrance'
+        return 'أذكار الصباح' if lang == 'ar' else 'Morning Remembrance'
     elif kind == 'azkar_evening':
-        return 'أذكار المساء' if lang=='ar' else 'Evening Remembrance'
+        return 'أذكار المساء' if lang == 'ar' else 'Evening Remembrance'
     elif kind == 'daily_recap':
-        return 'ملخص اليوم' if lang=='ar' else 'Daily Recap'
+        return 'ملخص اليوم' if lang == 'ar' else 'Daily Recap'
     elif kind == 'audio':
-        return {'file_id': None, 'url': 'https://example.com/sample.mp3', 'caption': 'تلاوة قصيرة' if lang=='ar' else 'Short recitation'}
+        return {'file_id': None, 'url': 'https://example.com/sample.mp3', 'caption': 'تلاوة قصيرة' if lang == 'ar' else 'Short recitation'}
     return None
 
 # ---- Scheduler ----
@@ -96,16 +97,19 @@ async def auto_poster():
     while True:
         now = datetime.datetime.now(DEFAULT_TZ)
         hour = now.hour
+
         async with aiosqlite.connect(DB_PATH) as db:
             cur = await db.execute("""
-                SELECT channel_id, lang, enabled_ayah, enabled_hadith, enabled_azkar_morning,
-                       enabled_azkar_evening, enabled_daily_recap, enabled_audio
+                SELECT channel_id, lang, enabled_ayah, enabled_hadith,
+                       enabled_azkar_morning, enabled_azkar_evening,
+                       enabled_daily_recap, enabled_audio
                 FROM channels
             """)
             channels = await cur.fetchall()
 
         for ch_id, lang, e_ayah, e_hadith, e_morn, e_even, e_recap, e_audio in channels:
             content = None
+
             if hour == 6 and e_morn:
                 content = await fetch_content('azkar_morning', lang)
             elif hour == 18 and e_even:
@@ -113,15 +117,16 @@ async def auto_poster():
             elif hour % 3 == 0 and e_ayah:
                 content = await fetch_content('ayah', lang)
 
-            if content is None:
+            if not content:
                 continue
 
             try:
                 if isinstance(content, dict):
-                    if content.get('file_id'):
-                        await bot.send_audio(ch_id, content['file_id'], caption=content.get('caption'))
-                    else:
-                        await bot.send_audio(ch_id, content['url'], caption=content.get('caption'))
+                    await bot.send_audio(
+                        ch_id,
+                        content['file_id'] or content['url'],
+                        caption=content['caption']
+                    )
                 else:
                     await bot.send_message(ch_id, content)
             except Exception as e:
